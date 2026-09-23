@@ -1,6 +1,11 @@
+import { GoogleGenAI } from "@google/genai";
 import type { ChatMsg } from "./protocol";
 
-const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const GEMINI_API_KEY =
+  process.env.EXPO_PUBLIC_GEMINI_API_KEY ||
+  "AQ.Ab8RN6IHsA1suleiql1c22_oALfgjCDC3NN_tc-JugKiB9Banw";
+
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 interface StreamHandlers {
   onDelta: (text: string) => void;
@@ -8,11 +13,30 @@ interface StreamHandlers {
   onError: (message: string) => void;
 }
 
-/**
- * Streams `/api/assistant/chat` from the backend. Uses SSE-style
- * `data: {json}\n\n` chunks. Works on web (fetch + ReadableStream) and
- * modern React Native (fetch stream body).
- */
+const SYSTEM_INSTRUCTION = `
+You are NOVA, an intelligent task and productivity AI assistant.
+When the user asks you to manage tasks or projects (create, update, complete, delete), respond with a helpful message, and at the VERY END of your response, append an actions block in this EXACT format:
+
+<<<ACTIONS>>>
+[
+  { "type": "create_task", "title": "Task title", "priority": "normal", "category": "personal" }
+]
+<<<END>>>
+
+Available Action Types:
+- create_task: { "type": "create_task", "title": string, "priority"?: "low"|"normal"|"high"|"urgent", "category"?: string, "dueDate"?: string|null, "projectId"?: string|null }
+- update_task: { "type": "update_task", "id": string, "patch": { "title"?: string, "priority"?: string, "category"?: string, "dueDate"?: string|null } }
+- complete_task: { "type": "complete_task", "id": string }
+- delete_task: { "type": "delete_task", "id": string }
+- create_project: { "type": "create_project", "title": string, "category"?: string }
+- delete_project: { "type": "delete_project", "id": string }
+
+Rules:
+1. Always base task IDs on the existing tasks provided in the context.
+2. ONLY output the <<<ACTIONS>>> block if there are actual task/project actions to perform.
+3. Keep the JSON valid inside the block.
+`;
+
 export async function streamAssistant(
   args: {
     sessionId: string;
@@ -22,108 +46,29 @@ export async function streamAssistant(
   },
   handlers: StreamHandlers,
 ): Promise<void> {
-  if (!BASE_URL) {
-    handlers.onError("Backend URL is not configured.");
-    return;
-  }
-  const url = `${BASE_URL}/api/assistant/chat`;
-
-  let response: Response;
   try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      },
-      body: JSON.stringify({
-        session_id: args.sessionId,
-        messages: args.messages,
-        context: args.context,
-      }),
-      signal: args.signal,
+    const contextStr = args.context
+      ? `\n\nCurrent App Context (User Tasks & Data):\n${JSON.stringify(args.context)}`
+      : "";
+
+    const userPrompt = `${SYSTEM_INSTRUCTION}${contextStr}\n\nUser Message: ${
+      args.messages[args.messages.length - 1]?.content || "Hello"
+    }`;
+
+    // Official Google GenAI Interactions API call
+    const interaction = await ai.interactions.create({
+      model: "gemini-3.5-flash",
+      input: userPrompt,
     });
+
+    const replyText = interaction.output_text || "No response generated.";
+
+    handlers.onDelta(replyText);
+    handlers.onDone();
   } catch (e: any) {
-    handlers.onError(
-      e?.message?.includes("Aborted") ? "" : "Couldn't reach the AI service. Check your connection.",
-    );
-    return;
-  }
-
-  if (!response.ok) {
-    handlers.onError(`AI service unavailable (${response.status}).`);
-    return;
-  }
-
-  const body = (response as any).body;
-  if (!body || typeof body.getReader !== "function") {
-    // Fallback: some environments don't expose the stream — read as text.
-    try {
-      const text = await response.text();
-      processSSEBuffer(text, handlers);
-      handlers.onDone();
-    } catch (e: any) {
-      handlers.onError(e?.message ?? "Streaming not supported here.");
-    }
-    return;
-  }
-
-  const reader = body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let buf = "";
-  let ended = false;
-  try {
-    while (!ended) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-
-      const parts = buf.split("\n\n");
-      buf = parts.pop() ?? "";
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (!payload) continue;
-        try {
-          const obj = JSON.parse(payload);
-          if (obj.delta) handlers.onDelta(String(obj.delta));
-          if (obj.error) {
-            handlers.onError(String(obj.error));
-            ended = true;
-            break;
-          }
-          if (obj.done) {
-            handlers.onDone();
-            ended = true;
-            break;
-          }
-        } catch {
-          // Ignore unparseable lines mid-stream
-        }
-      }
-    }
-    if (!ended) handlers.onDone();
-  } catch (e: any) {
-    if (e?.name !== "AbortError") {
-      handlers.onError(e?.message ?? "Streaming failed.");
-    }
+    console.error("Gemini SDK Error:", e);
+    handlers.onError(`AI Error: ${e?.message || "Service unavailable"}`);
   }
 }
 
-function processSSEBuffer(text: string, handlers: StreamHandlers) {
-  const parts = text.split("\n\n");
-  for (const part of parts) {
-    const line = part.trim();
-    if (!line.startsWith("data:")) continue;
-    const payload = line.slice(5).trim();
-    try {
-      const obj = JSON.parse(payload);
-      if (obj.delta) handlers.onDelta(String(obj.delta));
-      if (obj.error) handlers.onError(String(obj.error));
-    } catch {}
-  }
-}
-
-// Re-exported so callers don't need a separate import chain
 export type { ChatMsg };

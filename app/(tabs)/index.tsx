@@ -12,6 +12,8 @@ import { greetingForNow, isDueToday, isOverdue } from "@/src/utils/date";
 import { TaskRow } from "@/src/components/TaskRow";
 import { EmptyState } from "@/src/components/EmptyState";
 
+import { AdBanner } from '../../src/components/AdBanner';
+
 export default function Home() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
@@ -342,3 +344,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 });
+// Inside your main screen layout return statement at the bottom:
+<View style={{ flex: 1 }}>
+  {/* Existing App Content / Task List */}
+  
+  <AdBanner />
+</View>

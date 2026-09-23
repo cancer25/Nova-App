@@ -1,12 +1,16 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "Nova App",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "frontend",
+    "scheme": "novaapp",
     "userInterfaceStyle": "automatic",
+    "updates": {
+      "url": "https://u.expo.dev/3bb53117-0041-40e0-b8ba-365c62e71b1c"
+    },
+    "runtimeVersion": "1.0.0",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.novamvp.iqofzv",
@@ -17,7 +21,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/images/splash-image.png",
         "backgroundColor": "#000000"
       },
       "package": "com.emergent.novamvp.iqofzv",
@@ -60,6 +64,14 @@
         {
           "color": "#4A6B53",
           "defaultChannel": "reminders"
+        }
+      ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511",
+          "userTrackingUsageDescription": "This identifier will be used to deliver personalized ads to you."
         }
       ]
     ],
