@@ -1,0 +1,8 @@
+{
+  "name": "NOVA - Minimalist Task & Productivity Planner",
+  "description": "A quiet space to think, plan, and get things done with smart natural-language capture and an intelligent AI productivity assistant.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

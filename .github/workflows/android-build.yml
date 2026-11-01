@@ -2,6 +2,8 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main, master ]
 
 jobs:
   build:
@@ -15,6 +17,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -22,20 +25,39 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm install --legacy-peer-deps
 
       - name: Prebuild Android project
-        run: npx expo prebuild --platform android --clean
+        run: |
+          npx expo prebuild --platform android --clean
 
-      - name: Build Android APK via Gradle
+      - name: Configure Gradle Signing & Memory
         run: |
           cd android
+          # Ensure release builds are signed with debug keystore for installable APKs
+          sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/g' app/build.gradle || true
+          # Add memory limits to gradle.properties to prevent OOM errors
+          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8" >> gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+          echo "org.gradle.parallel=true" >> gradle.properties
           chmod +x gradlew
-          ./gradlew assembleRelease -PkotlinVersion=2.1.20
 
-      - name: Upload APK
+      - name: Build Android APK via Gradle
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -Dorg.gradle.daemon=false"
+        run: |
+          cd android
+          # Run assembleRelease (now signed with debug keystore) or fallback to assembleDebug
+          ./gradlew assembleRelease --no-daemon --stacktrace || ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NOVA-App-Release
-          path: android/app/build/outputs/apk/release/app-release.apk
+          name: NOVA-App-APK
+          path: android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error

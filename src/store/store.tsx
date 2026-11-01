@@ -1,21 +1,86 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppData, Task, Project, Note, Settings, Priority } from "./types";
 
 const STORAGE_KEY = "nova.appdata.v1";
 
 const defaultSettings: Settings = {
-  name: "",
-  onboarded: false,
-  focus: null,
-  themePref: "system",
+  name: "Friend",
+  onboarded: true,
+  focus: "everything",
+  themePref: "dark",
   defaultPriority: "normal",
 };
 
+const initialTasks: Task[] = [
+  {
+    id: "task-welcome-1",
+    title: "Welcome to NOVA! Explore your new quiet productivity space",
+    description: "Tap to edit details, set due dates, or categorize into projects.",
+    type: "task",
+    priority: "high",
+    category: "personal",
+    dueDate: new Date().toISOString(),
+    completed: false,
+    completedAt: null,
+    projectId: "proj-intro",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: "task-welcome-2",
+    title: "Try Smart Capture: type 'Finish quarterly report tomorrow urgent'",
+    description: "Natural language detection automatically extracts dates, categories, and priorities.",
+    type: "task",
+    priority: "normal",
+    category: "work",
+    dueDate: new Date(Date.now() + 86400000).toISOString(),
+    completed: false,
+    completedAt: null,
+    projectId: "proj-intro",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: "task-welcome-3",
+    title: "Ask NOVA Assistant: click the zap icon to plan your day",
+    description: "NOVA can review all your items and suggest actionable steps.",
+    type: "task",
+    priority: "normal",
+    category: "study",
+    dueDate: null,
+    completed: false,
+    completedAt: null,
+    projectId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+];
+
+const initialProjects: Project[] = [
+  {
+    id: "proj-intro",
+    title: "Getting Started with NOVA",
+    description: "Essential tips and quick setup for organizing your workflow.",
+    category: "work",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+];
+
+const initialNotes: Note[] = [
+  {
+    id: "note-welcome",
+    title: "NOVA Principles: Quiet Clarity",
+    body: "1. Capture instantly when ideas strike.\n2. Keep today's high-priority tasks to 2-3 essential items.\n3. Group deep work into focused Projects.\n4. Let AI organize and plan without sacrificing control.",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+];
+
 const defaultData: AppData = {
-  tasks: [],
-  projects: [],
-  notes: [],
+  tasks: initialTasks,
+  projects: initialProjects,
+  notes: initialNotes,
   settings: defaultSettings,
 };
 
@@ -48,32 +113,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as AppData;
-          setData({
-            tasks: parsed.tasks ?? [],
-            projects: parsed.projects ?? [],
-            notes: parsed.notes ?? [],
-            settings: { ...defaultSettings, ...(parsed.settings ?? {}) },
-          });
-        }
-      } catch (e) {
-        console.log("Failed to load app data", e);
-      } finally {
-        setLoading(false);
-        setHydrated(true);
+    try {
+      const raw = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
+      if (raw) {
+        const parsed = JSON.parse(raw) as AppData;
+        setData({
+          tasks: parsed.tasks ?? initialTasks,
+          projects: parsed.projects ?? initialProjects,
+          notes: parsed.notes ?? initialNotes,
+          settings: { ...defaultSettings, ...(parsed.settings ?? {}) },
+        });
       }
-    })();
+    } catch (e) {
+      console.log("Failed to load app data", e);
+    } finally {
+      setLoading(false);
+      setHydrated(true);
+    }
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data)).catch((e) =>
-      console.log("Failed to save app data", e),
-    );
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      }
+    } catch (e) {
+      console.log("Failed to save app data", e);
+    }
   }, [data, hydrated]);
 
   const addTask = useCallback((input: Partial<Task> & { title: string }) => {
@@ -187,7 +254,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const resetAll = useCallback(() => {
-    setData(defaultData);
+    setData({
+      tasks: [],
+      projects: [],
+      notes: [],
+      settings: defaultSettings,
+    });
   }, []);
 
   const value = useMemo<Ctx>(

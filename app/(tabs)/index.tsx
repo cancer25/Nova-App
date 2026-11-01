@@ -225,6 +225,9 @@ export default function Home() {
           </View>
         )}
       </ScrollView>
+
+      {/* AdMob Banner at bottom of screen */}
+      <AdBanner />
     </View>
   );
 }
@@ -344,9 +347,3 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 });
-// Inside your main screen layout return statement at the bottom:
-<View style={{ flex: 1 }}>
-  {/* Existing App Content / Task List */}
-  
-  <AdBanner />
-</View>

@@ -1,5 +1,4 @@
-import { useColorScheme } from "react-native";
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 export type ThemePref = "system" | "light" | "dark";
 
@@ -81,9 +80,9 @@ export const radius = {
 };
 
 export const font = {
-  regular: "PlusJakartaSans-Regular",
-  medium: "PlusJakartaSans-Medium",
-  semibold: "PlusJakartaSans-SemiBold",
+  regular: "Plus Jakarta Sans, sans-serif",
+  medium: "Plus Jakarta Sans, sans-serif",
+  semibold: "Plus Jakarta Sans, sans-serif",
 };
 
 export const type = {
@@ -103,9 +102,9 @@ export const ThemeContext = createContext<{
   pref: ThemePref;
   setPref: (p: ThemePref) => void;
 }>({
-  colors: lightColors,
-  isDark: false,
-  pref: "system",
+  colors: darkColors,
+  isDark: true,
+  pref: "dark",
   setPref: () => {},
 });
 
@@ -113,7 +112,10 @@ export function useTheme() {
   return useContext(ThemeContext);
 }
 
-export function resolveColors(pref: ThemePref, systemScheme: "light" | "dark" | null | undefined): {
+export function resolveColors(
+  pref: ThemePref,
+  systemScheme: "light" | "dark" | null | undefined
+): {
   colors: Colors;
   isDark: boolean;
 } {
@@ -122,5 +124,4 @@ export function resolveColors(pref: ThemePref, systemScheme: "light" | "dark" | 
   return { colors: isDark ? darkColors : lightColors, isDark };
 }
 
-// Default colors export used by components that don't need dark mode reactivity
-export const colors = lightColors;
+export const colors = darkColors;
