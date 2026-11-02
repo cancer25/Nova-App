@@ -35,6 +35,34 @@ export function formatShortDate(iso: string | null | undefined): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+export function formatTimeOnly(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+export function formatLocalDateTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const dateStr = formatShortDate(iso);
+  // If the time is exactly midnight 00:00:00 without explicit minutes, show just date
+  if (d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0) {
+    return dateStr;
+  }
+  const timeStr = formatTimeOnly(iso);
+  return `${dateStr} at ${timeStr}`;
+}
+
+export function toLocalDatetimeInputString(d: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 export function greetingForNow(): string {
   const h = new Date().getHours();
   if (h < 5) return "Good night";

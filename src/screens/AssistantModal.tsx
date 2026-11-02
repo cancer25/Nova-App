@@ -11,6 +11,8 @@ import {
 } from '@/src/assistant/protocol';
 import { streamAssistant } from '@/src/assistant/client';
 import { storage } from '@/src/utils/storage';
+import { getAiQuota, consumeAiMessage, subscribeAiQuota, AiQuotaState } from '@/src/utils/aiQuota';
+import { RewardedAdModal } from '@/src/components/RewardedAdModal';
 
 const CHAT_KEY = 'nova.chat.v1';
 const SESSION_KEY = 'nova.chat.session.v1';
@@ -46,10 +48,18 @@ export function AssistantModal({ onClose }: AssistantModalProps) {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [quota, setQuota] = useState<AiQuotaState>(getAiQuota());
+  const [showAdModal, setShowAdModal] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const hydratedRef = useRef(false);
+
+  // Subscribe to AI quota updates
+  useEffect(() => {
+    const unsub = subscribeAiQuota((q) => setQuota(q));
+    return unsub;
+  }, []);
 
   // Load chat
   useEffect(() => {
@@ -89,6 +99,14 @@ export function AssistantModal({ onClose }: AssistantModalProps) {
     async (userText: string) => {
       const text = userText.trim();
       if (!text || streaming || !sessionId) return;
+
+      // Enforce 13-message quota
+      if (quota.remaining <= 0) {
+        setShowAdModal(true);
+        return;
+      }
+
+      await consumeAiMessage();
 
       const userMsg: ChatMsg = {
         id: newId(),
@@ -252,6 +270,21 @@ export function AssistantModal({ onClose }: AssistantModalProps) {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* AI Message Quota Pill */}
+            <button
+              onClick={() => setShowAdModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-all hover:scale-105 active:scale-95"
+              style={{
+                backgroundColor: quota.remaining <= 2 ? '#EF444422' : colors.brandTertiary,
+                borderColor: quota.remaining <= 2 ? '#EF4444' : colors.brandSecondary,
+                color: quota.remaining <= 2 ? '#EF4444' : colors.brandPrimary,
+              }}
+              title="Click to watch 15s ad and refill +13 messages"
+            >
+              <Icon name="zap" size={12} />
+              <span>{quota.remaining}/13 msgs</span>
+            </button>
+
             {!empty && (
               <button
                 onClick={clearChat}
@@ -439,11 +472,36 @@ export function AssistantModal({ onClose }: AssistantModalProps) {
           className="p-3 sm:p-4 border-t shrink-0"
           style={{ borderColor: colors.divider }}
         >
+          {quota.remaining <= 0 && (
+            <div
+              className="mb-3 p-3 rounded-2xl border flex items-center justify-between gap-3 text-xs"
+              style={{
+                backgroundColor: '#EF444415',
+                borderColor: '#EF444444',
+                color: colors.onSurface,
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+                <span className="font-semibold">
+                  13 AI messages used. Watch a 15-second ad to unlock 13 more messages!
+                </span>
+              </div>
+              <button
+                onClick={() => setShowAdModal(true)}
+                className="px-3.5 py-1.5 rounded-xl font-bold text-xs shrink-0 transition-transform hover:scale-105 active:scale-95 flex items-center gap-1.5 text-white bg-red-500 shadow-sm"
+              >
+                <Icon name="play" size={13} />
+                <span>Watch Ad (+13)</span>
+              </button>
+            </div>
+          )}
+
           <div
             className="flex items-center gap-2 p-1.5 pl-4 rounded-2xl border transition-all"
             style={{
               backgroundColor: colors.surfaceSecondary,
-              borderColor: colors.border,
+              borderColor: quota.remaining <= 0 ? '#EF4444' : colors.border,
             }}
           >
             <input
@@ -456,7 +514,13 @@ export function AssistantModal({ onClose }: AssistantModalProps) {
                   send(input);
                 }
               }}
-              placeholder={streaming ? 'NOVA is replying...' : 'Message NOVA...'}
+              placeholder={
+                streaming
+                  ? 'NOVA is replying...'
+                  : quota.remaining <= 0
+                  ? 'Limit reached — watch ad to continue'
+                  : 'Message NOVA...'
+              }
               disabled={streaming}
               className="w-full bg-transparent outline-none text-sm sm:text-base font-medium"
             />
@@ -465,7 +529,7 @@ export function AssistantModal({ onClose }: AssistantModalProps) {
               disabled={!streaming && !input.trim()}
               className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all disabled:opacity-40"
               style={{
-                backgroundColor: colors.brandPrimary,
+                backgroundColor: quota.remaining <= 0 ? '#EF4444' : colors.brandPrimary,
                 color: colors.onBrandPrimary,
               }}
             >
@@ -474,6 +538,12 @@ export function AssistantModal({ onClose }: AssistantModalProps) {
           </div>
         </div>
       </div>
+
+      {/* 15s Rewarded Ad Modal */}
+      <RewardedAdModal
+        isOpen={showAdModal}
+        onClose={() => setShowAdModal(false)}
+      />
     </div>
   );
 }

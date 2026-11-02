@@ -10,8 +10,12 @@ import {
   priorityLabel,
   itemTypeLabel,
   formatShortDate,
+  formatLocalDateTime,
+  formatTimeOnly,
+  toLocalDatetimeInputString,
   addDays,
 } from '@/src/utils/date';
+import { scheduleTaskReminder, cancelTaskReminder, getUserTimeZone } from '@/src/utils/notifications';
 import { Priority, Category, ItemType } from '@/src/store/types';
 
 interface TaskDetailModalProps {
@@ -28,6 +32,9 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const [title, setTitle] = useState(task?.title ?? '');
   const [description, setDescription] = useState(task?.description ?? '');
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+  const [customDatetime, setCustomDatetime] = useState(
+    task?.reminderTime ? toLocalDatetimeInputString(new Date(task.reminderTime)) : toLocalDatetimeInputString()
+  );
 
   if (!task) return null;
 
@@ -39,6 +46,30 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
 
   const handleDescBlur = () => {
     commit({ description: description.trim() });
+  };
+
+  const handleSetReminder = async (targetDate: Date) => {
+    if (task.notificationId) {
+      await cancelTaskReminder(task.notificationId, task.id);
+    }
+    const notifId = await scheduleTaskReminder({
+      id: task.id,
+      title: title.trim() || task.title,
+      body: description.trim() || 'Time to complete your task!',
+      date: targetDate,
+    });
+    commit({
+      reminderTime: targetDate.toISOString(),
+      notificationId: notifId,
+      dueDate: targetDate.toISOString(),
+    });
+  };
+
+  const handleClearReminder = async () => {
+    if (task.notificationId) {
+      await cancelTaskReminder(task.notificationId, task.id);
+    }
+    commit({ reminderTime: null, notificationId: null });
   };
 
   const setDueQuick = (key: string) => {
@@ -210,6 +241,134 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                   {d.label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Local Time Reminder & Alarm */}
+          <div className="space-y-3 p-4 rounded-2xl border" style={{ backgroundColor: colors.surfaceSecondary, borderColor: colors.border }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Icon name="bell" size={15} color={colors.brandPrimary} />
+                <span className="text-xs font-bold uppercase tracking-wider">
+                  Reminder & Phone Alarm
+                </span>
+              </div>
+              <span className="text-[11px] opacity-60 font-medium">
+                {getUserTimeZone()}
+              </span>
+            </div>
+
+            {task.reminderTime ? (
+              <div
+                className="p-3.5 rounded-xl border flex items-center justify-between gap-3"
+                style={{
+                  backgroundColor: `${colors.brandPrimary}15`,
+                  borderColor: `${colors.brandPrimary}40`,
+                }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: colors.brandPrimary, color: colors.onBrandPrimary }}
+                  >
+                    <Icon name="bell" size={15} />
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold">
+                      {formatLocalDateTime(task.reminderTime)}
+                    </div>
+                    <div className="text-[11px] opacity-60">
+                      Exact phone alarm & notification scheduled
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleClearReminder}
+                  className="px-3 py-1.5 rounded-lg border text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                  style={{ borderColor: colors.border }}
+                >
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs opacity-60 leading-relaxed">
+                Set an alarm to trigger a sound and push notification on your device at your exact local time.
+              </p>
+            )}
+
+            {/* Quick Reminder Presets */}
+            <div className="space-y-2 pt-1">
+              <span className="text-[11px] font-semibold opacity-60 block">
+                Quick Presets:
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  {
+                    label: 'In 15 mins',
+                    calc: () => new Date(Date.now() + 15 * 60 * 1000),
+                  },
+                  {
+                    label: 'In 1 hour',
+                    calc: () => new Date(Date.now() + 60 * 60 * 1000),
+                  },
+                  {
+                    label: 'Tonight at 8 PM',
+                    calc: () => {
+                      const d = new Date();
+                      d.setHours(20, 0, 0, 0);
+                      if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+                      return d;
+                    },
+                  },
+                  {
+                    label: 'Tomorrow at 9 AM',
+                    calc: () => {
+                      const d = addDays(new Date(), 1);
+                      d.setHours(9, 0, 0, 0);
+                      return d;
+                    },
+                  },
+                ].map((preset) => (
+                  <button
+                    key={preset.label}
+                    onClick={() => handleSetReminder(preset.calc())}
+                    className="px-3 py-1.5 rounded-xl text-xs font-medium border transition-all hover:scale-[1.02] active:scale-95"
+                    style={{
+                      backgroundColor: colors.surfaceTertiary,
+                      borderColor: colors.border,
+                      color: colors.onSurface,
+                    }}
+                  >
+                    + {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Datetime Picker */}
+            <div className="pt-2 border-t space-y-1.5" style={{ borderColor: colors.divider }}>
+              <span className="text-[11px] font-semibold opacity-60 block">
+                Or choose exact date & time (Local):
+              </span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="datetime-local"
+                  value={customDatetime}
+                  onChange={(e) => {
+                    setCustomDatetime(e.target.value);
+                    if (e.target.value) {
+                      handleSetReminder(new Date(e.target.value));
+                    }
+                  }}
+                  className="px-3 py-2 rounded-xl border text-xs sm:text-sm font-medium outline-none flex-1"
+                  style={{
+                    backgroundColor: colors.surfaceTertiary,
+                    borderColor: colors.border,
+                    color: colors.onSurface,
+                  }}
+                />
+              </div>
             </div>
           </div>
 

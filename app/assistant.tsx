@@ -11,11 +11,13 @@ import {
   Animated,
   Easing,
   Alert,
+  Modal,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { storage } from "@/src/utils/storage";
+import { getAiQuota, consumeAiMessage, subscribeAiQuota, refillAiQuota, DEFAULT_AI_QUOTA, AiQuotaState } from "@/src/utils/aiQuota";
 
 import { Text } from "@/src/components/Text";
 import { Icon } from "@/src/components/Icon";
@@ -62,9 +64,47 @@ export default function Assistant() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [quota, setQuota] = useState<AiQuotaState>(getAiQuota());
+  const [showAdModal, setShowAdModal] = useState(false);
+  const [adSecondsLeft, setAdSecondsLeft] = useState(15);
+  const [adRewardReady, setAdRewardReady] = useState(false);
+  const adTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const scrollRef = useRef<ScrollView | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const hydratedRef = useRef(false);
+
+  // Subscribe to quota changes
+  useEffect(() => {
+    const unsub = subscribeAiQuota((q) => setQuota(q));
+    return unsub;
+  }, []);
+
+  const startAd = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setShowAdModal(true);
+    setAdSecondsLeft(15);
+    setAdRewardReady(false);
+    if (adTimerRef.current) clearInterval(adTimerRef.current);
+    adTimerRef.current = setInterval(() => {
+      setAdSecondsLeft((prev) => {
+        if (prev <= 1) {
+          if (adTimerRef.current) clearInterval(adTimerRef.current);
+          setAdRewardReady(true);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const claimAdReward = async () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    await refillAiQuota(DEFAULT_AI_QUOTA);
+    setShowAdModal(false);
+    if (adTimerRef.current) clearInterval(adTimerRef.current);
+  };
 
   // Load persisted chat + session
   useEffect(() => {
@@ -99,6 +139,12 @@ export default function Assistant() {
     async (userText: string) => {
       const text = userText.trim();
       if (!text || streaming || !sessionId) return;
+
+      if (quota.remaining <= 0) {
+        startAd();
+        return;
+      }
+      await consumeAiMessage();
 
       const userMsg: ChatMsg = {
         id: newId(),
@@ -286,9 +332,35 @@ export default function Assistant() {
             </Text>
           </View>
         </View>
-        <Pressable testID="assistant-clear" onPress={clearChat} hitSlop={12} disabled={empty}>
-          <Icon name="rotate-ccw" size={20} color={empty ? colors.muted : colors.onSurface} />
-        </Pressable>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+          <Pressable
+            onPress={startAd}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 4,
+              paddingHorizontal: spacing.sm,
+              paddingVertical: 5,
+              borderRadius: radius.pill,
+              backgroundColor: quota.remaining <= 2 ? colors.surfaceTertiary : colors.brandTertiary,
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: quota.remaining <= 2 ? colors.error : colors.brandSecondary,
+            }}
+          >
+            <Icon name="zap" size={11} color={quota.remaining <= 2 ? colors.error : colors.brandPrimary} />
+            <Text
+              style={{ fontSize: 12 }}
+              weight="bold"
+              color={quota.remaining <= 2 ? colors.error : colors.brandPrimary}
+            >
+              {quota.remaining}/13 msgs
+            </Text>
+          </Pressable>
+
+          <Pressable testID="assistant-clear" onPress={clearChat} hitSlop={12} disabled={empty}>
+            <Icon name="rotate-ccw" size={20} color={empty ? colors.muted : colors.onSurface} />
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
@@ -363,6 +435,43 @@ export default function Assistant() {
           },
         ]}
       >
+        {/* Quota limit warning banner */}
+        {quota.remaining <= 0 && (
+          <Pressable
+            onPress={startAd}
+            style={{
+              marginBottom: spacing.xs,
+              padding: spacing.md,
+              borderRadius: radius.md,
+              backgroundColor: colors.surfaceTertiary,
+              borderWidth: 1,
+              borderColor: colors.error,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs, flex: 1 }}>
+              <Icon name="alert-circle" size={16} color={colors.error} />
+              <Text weight="medium" style={{ fontSize: 12, flex: 1 }}>
+                13 AI messages used. Watch 15s ad to get 13 more!
+              </Text>
+            </View>
+            <View
+              style={{
+                backgroundColor: colors.brandPrimary,
+                paddingHorizontal: spacing.md,
+                paddingVertical: 6,
+                borderRadius: radius.pill,
+              }}
+            >
+              <Text weight="bold" style={{ fontSize: 12 }} color={colors.onBrandPrimary}>
+                Watch Ad
+              </Text>
+            </View>
+          </Pressable>
+        )}
+
         <View
           style={[
             styles.inputWrap,
@@ -373,7 +482,13 @@ export default function Assistant() {
             testID="assistant-input"
             value={input}
             onChangeText={setInput}
-            placeholder={streaming ? "NOVA is replying..." : "Message NOVA"}
+            placeholder={
+              streaming
+                ? "NOVA is replying..."
+                : quota.remaining <= 0
+                ? "Limit reached — watch ad to refill"
+                : "Message NOVA"
+            }
             placeholderTextColor={colors.muted}
             multiline
             editable={!streaming}
@@ -395,7 +510,11 @@ export default function Assistant() {
               styles.sendBtn,
               {
                 backgroundColor:
-                  streaming || input.trim() ? colors.brandPrimary : colors.surfaceTertiary,
+                  quota.remaining <= 0
+                    ? colors.error
+                    : streaming || input.trim()
+                    ? colors.brandPrimary
+                    : colors.surfaceTertiary,
               },
             ]}
           >
@@ -407,6 +526,135 @@ export default function Assistant() {
           </Pressable>
         </View>
       </View>
+
+      {/* 15-second Rewarded Ad Modal */}
+      <Modal visible={showAdModal} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", padding: spacing.xl }}>
+          <View
+            style={{
+              backgroundColor: colors.surface,
+              borderRadius: radius.xl,
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: colors.border,
+              overflow: "hidden",
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: spacing.md,
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderBottomColor: colors.divider,
+                backgroundColor: colors.surfaceSecondary,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <View
+                  style={{
+                    backgroundColor: "rgba(245, 158, 11, 0.2)",
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 4,
+                  }}
+                >
+                  <Text weight="bold" style={{ fontSize: 10, color: "#F59E0B" }}>
+                    AD · 15s
+                  </Text>
+                </View>
+                <Text variant="caption">Watch to refill AI messages</Text>
+              </View>
+              {adRewardReady ? (
+                <Pressable onPress={() => setShowAdModal(false)}>
+                  <Icon name="x" size={18} color={colors.onSurface} />
+                </Pressable>
+              ) : (
+                <Text weight="bold" color={colors.brandPrimary} style={{ fontSize: 13 }}>
+                  {adSecondsLeft}s
+                </Text>
+              )}
+            </View>
+
+            <View style={{ padding: spacing.xl, alignItems: "center" }}>
+              {!adRewardReady ? (
+                <View style={{ alignItems: "center", gap: spacing.md, width: "100%" }}>
+                  <View
+                    style={{
+                      width: 64,
+                      height: 64,
+                      borderRadius: 32,
+                      backgroundColor: colors.brandTertiary,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Icon name="zap" size={30} color={colors.brandPrimary} />
+                  </View>
+                  <Text weight="bold" style={{ fontSize: 18, textAlign: "center" }}>
+                    NOVA Productivity Cloud
+                  </Text>
+                  <Text variant="body" color={colors.muted} style={{ textAlign: "center", maxWidth: 260 }}>
+                    Deep work sessions, smart audio capture, and ambient soundscapes.
+                  </Text>
+                  <View
+                    style={{
+                      marginTop: spacing.md,
+                      paddingHorizontal: spacing.lg,
+                      paddingVertical: spacing.sm,
+                      borderRadius: radius.pill,
+                      backgroundColor: colors.surfaceSecondary,
+                    }}
+                  >
+                    <Text variant="caption" color={colors.brandPrimary} weight="semibold">
+                      Reward unlocks in {adSecondsLeft} seconds...
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={{ alignItems: "center", gap: spacing.md }}>
+                  <View
+                    style={{
+                      width: 64,
+                      height: 64,
+                      borderRadius: 32,
+                      backgroundColor: colors.brandPrimary,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Icon name="check-circle" size={32} color={colors.onBrandPrimary} />
+                  </View>
+                  <Text weight="bold" style={{ fontSize: 20 }}>
+                    Reward Ready!
+                  </Text>
+                  <Text variant="body" color={colors.muted} style={{ textAlign: "center" }}>
+                    You earned +13 AI messages to continue chatting with NOVA.
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View style={{ padding: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider }}>
+              <Pressable
+                onPress={claimAdReward}
+                disabled={!adRewardReady}
+                style={{
+                  backgroundColor: adRewardReady ? colors.brandPrimary : colors.surfaceTertiary,
+                  paddingVertical: spacing.md,
+                  borderRadius: radius.pill,
+                  alignItems: "center",
+                  opacity: adRewardReady ? 1 : 0.6,
+                }}
+              >
+                <Text weight="bold" color={adRewardReady ? colors.onBrandPrimary : colors.muted}>
+                  {adRewardReady ? "Claim +13 Messages & Continue" : `Watching Ad... (${adSecondsLeft}s)`}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }

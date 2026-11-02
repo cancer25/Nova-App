@@ -172,10 +172,56 @@ function splitIntoItems(input: string): string[] {
 
 // ---------- Extract due date ----------
 
+function extractTime(text: string): { hours: number; minutes: number; matched: RegExp } | null {
+  const lower = text.toLowerCase();
+  // 12-hour: at 3:30 pm, 3pm, at 8 am
+  const match1 = lower.match(/\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (match1) {
+    let hours = parseInt(match1[1], 10);
+    const minutes = match1[2] ? parseInt(match1[2], 10) : 0;
+    const isPm = match1[3].toLowerCase() === 'pm';
+    if (isPm && hours < 12) hours += 12;
+    if (!isPm && hours === 12) hours = 0;
+    return { hours, minutes, matched: /\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i };
+  }
+
+  // 24-hour: at 14:30
+  const match2 = lower.match(/\bat\s+(\d{1,2}):(\d{2})\b/i);
+  if (match2) {
+    const hours = parseInt(match2[1], 10);
+    const minutes = parseInt(match2[2], 10);
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return { hours, minutes, matched: /\bat\s+\d{1,2}:\d{2}\b/i };
+    }
+  }
+
+  return null;
+}
+
 function extractDueDate(text: string): { date: Date | null; matched: RegExp[] } {
   const matched: RegExp[] = [];
   const lower = text.toLowerCase();
   const now = nowStartOfDay();
+
+  // in N minutes
+  const inMins = lower.match(/\bin\s+(\d+)\s*(min|mins|minute|minutes)\b/);
+  if (inMins) {
+    const mins = parseInt(inMins[1], 10);
+    const target = new Date(Date.now() + mins * 60 * 1000);
+    matched.push(/\bin\s+\d+\s*(?:min|mins|minute|minutes)\b/);
+    return { date: target, matched };
+  }
+
+  // in N hours
+  const inHours = lower.match(/\bin\s+(a|an|\d+)\s*(hour|hours|hr|hrs)\b/);
+  if (inHours) {
+    const hrs = inHours[1] === 'a' || inHours[1] === 'an' ? 1 : parseInt(inHours[1], 10);
+    const target = new Date(Date.now() + hrs * 3600 * 1000);
+    matched.push(/\bin\s+(?:a|an|\d+)\s*(?:hour|hours|hr|hrs)\b/);
+    return { date: target, matched };
+  }
+
+  let baseDate: Date | null = null;
 
   // in N days / in a week
   const inDays = lower.match(/\bin\s+(a|an|\d+)\s+(day|days|week|weeks)\b/);
@@ -183,63 +229,73 @@ function extractDueDate(text: string): { date: Date | null; matched: RegExp[] } 
     const n = inDays[1] === "a" || inDays[1] === "an" ? 1 : parseInt(inDays[1], 10);
     const mult = inDays[2].startsWith("week") ? 7 : 1;
     matched.push(/\bin\s+(a|an|\d+)\s+(day|days|week|weeks)\b/);
-    return { date: addDays(now, n * mult), matched };
-  }
-
-  // tonight / today
-  if (/\b(today|tonight|this evening|this afternoon|this morning)\b/.test(lower)) {
+    baseDate = addDays(now, n * mult);
+  } else if (/\b(today|tonight|this evening|this afternoon|this morning)\b/.test(lower)) {
     matched.push(/\b(today|tonight|this evening|this afternoon|this morning)\b/);
-    return { date: now, matched };
-  }
-
-  // tomorrow
-  if (/\btomorrow\b/.test(lower)) {
+    baseDate = now;
+  } else if (/\btomorrow\b/.test(lower)) {
     matched.push(/\btomorrow\b/);
-    return { date: addDays(now, 1), matched };
-  }
-
-  // next week
-  if (/\bnext week\b/.test(lower)) {
+    baseDate = addDays(now, 1);
+  } else if (/\bnext week\b/.test(lower)) {
     matched.push(/\bnext week\b/);
-    return { date: addDays(now, 7), matched };
-  }
-
-  // this weekend
-  if (/\bthis weekend\b/.test(lower)) {
+    baseDate = addDays(now, 7);
+  } else if (/\bthis weekend\b/.test(lower)) {
     matched.push(/\bthis weekend\b/);
-    return { date: nextWeekday(6), matched };
-  }
-
-  // next/this <weekday>
-  for (let i = 0; i < WEEKDAYS.length; i++) {
-    const wd = WEEKDAYS[i];
-    const re = new RegExp(`\\b(?:next|this|on|by)\\s+${wd}\\b`, "i");
-    if (re.test(lower)) {
-      matched.push(re);
-      return { date: nextWeekday(i), matched };
-    }
-    const reBare = new RegExp(`\\b${wd}\\b`, "i");
-    if (reBare.test(lower)) {
-      matched.push(reBare);
-      return { date: nextWeekday(i), matched };
-    }
-  }
-
-  // on Month Day
-  for (let i = 0; i < MONTHS.length; i++) {
-    const m = MONTHS[i];
-    const re = new RegExp(`\\b(?:on\\s+)?${m}\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, "i");
-    const match = lower.match(re);
-    if (match) {
-      const day = parseInt(match[1], 10);
-      const year = now.getFullYear();
-      let target = new Date(year, i, day, 0, 0, 0, 0);
-      if (target.getTime() < now.getTime()) {
-        target = new Date(year + 1, i, day, 0, 0, 0, 0);
+    baseDate = nextWeekday(6);
+  } else {
+    // next/this <weekday>
+    for (let i = 0; i < WEEKDAYS.length; i++) {
+      const wd = WEEKDAYS[i];
+      const re = new RegExp(`\\b(?:next|this|on|by)\\s+${wd}\\b`, "i");
+      if (re.test(lower)) {
+        matched.push(re);
+        baseDate = nextWeekday(i);
+        break;
       }
-      matched.push(re);
-      return { date: target, matched };
+      const reBare = new RegExp(`\\b${wd}\\b`, "i");
+      if (reBare.test(lower)) {
+        matched.push(reBare);
+        baseDate = nextWeekday(i);
+        break;
+      }
     }
+
+    if (!baseDate) {
+      // on Month Day
+      for (let i = 0; i < MONTHS.length; i++) {
+        const m = MONTHS[i];
+        const re = new RegExp(`\\b(?:on\\s+)?${m}\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, "i");
+        const match = lower.match(re);
+        if (match) {
+          const day = parseInt(match[1], 10);
+          const year = now.getFullYear();
+          let target = new Date(year, i, day, 0, 0, 0, 0);
+          if (target.getTime() < now.getTime()) {
+            target = new Date(year + 1, i, day, 0, 0, 0, 0);
+          }
+          matched.push(re);
+          baseDate = target;
+          break;
+        }
+      }
+    }
+  }
+
+  // Extract explicit local time of day if present
+  const timeInfo = extractTime(text);
+  if (timeInfo) {
+    matched.push(timeInfo.matched);
+    const target = baseDate ? new Date(baseDate) : new Date();
+    target.setHours(timeInfo.hours, timeInfo.minutes, 0, 0);
+    // If no date was specified and time has already passed today, assume tomorrow
+    if (!baseDate && target.getTime() <= Date.now()) {
+      target.setDate(target.getDate() + 1);
+    }
+    return { date: target, matched };
+  }
+
+  if (baseDate) {
+    return { date: baseDate, matched };
   }
 
   return { date: null, matched };

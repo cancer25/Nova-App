@@ -26,8 +26,11 @@ import {
   priorityLabel,
   itemTypeLabel,
   formatShortDate,
+  formatLocalDateTime,
+  formatTimeOnly,
   addDays,
 } from "@/src/utils/date";
+import { scheduleTaskReminder, cancelTaskReminder, getUserTimeZone } from "@/src/utils/notifications";
 
 export default function TaskDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -51,6 +54,32 @@ export default function TaskDetail() {
   }
 
   const commit = (patch: Partial<typeof task>) => updateTask(task.id, patch);
+
+  const handleSetReminder = async (targetDate: Date) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (task.notificationId) {
+      await cancelTaskReminder(task.notificationId, task.id);
+    }
+    const notifId = await scheduleTaskReminder({
+      id: task.id,
+      title: title.trim() || task.title,
+      body: description.trim() || "Time for your task!",
+      date: targetDate,
+    });
+    commit({
+      reminderTime: targetDate.toISOString(),
+      notificationId: notifId,
+      dueDate: targetDate.toISOString(),
+    });
+  };
+
+  const handleClearReminder = async () => {
+    Haptics.selectionAsync();
+    if (task.notificationId) {
+      await cancelTaskReminder(task.notificationId, task.id);
+    }
+    commit({ reminderTime: null, notificationId: null });
+  };
 
   const onDelete = () => {
     Alert.alert("Delete task?", "This cannot be undone.", [
@@ -186,6 +215,89 @@ export default function TaskDetail() {
             labelFor={(k) => (k === "none" ? "None" : k === "week" ? "In a week" : k.charAt(0).toUpperCase() + k.slice(1))}
             testIDPrefix="task-due"
           />
+        </Section>
+
+        <Section label={`Reminder & Phone Alarm · ${getUserTimeZone()}`}>
+          <View style={{ paddingHorizontal: spacing.xl, gap: spacing.sm }}>
+            {task.reminderTime ? (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: spacing.md,
+                  borderRadius: radius.md,
+                  backgroundColor: colors.brandTertiary,
+                }}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, flex: 1 }}>
+                  <Icon name="bell" size={18} color={colors.brandPrimary} />
+                  <View style={{ flex: 1 }}>
+                    <Text weight="semibold" style={{ fontSize: 14 }}>
+                      {formatLocalDateTime(task.reminderTime)}
+                    </Text>
+                    <Text variant="caption" color={colors.muted}>
+                      Alarm & Notification Scheduled
+                    </Text>
+                  </View>
+                </View>
+                <Pressable
+                  onPress={handleClearReminder}
+                  style={{
+                    paddingHorizontal: spacing.md,
+                    paddingVertical: 6,
+                    borderRadius: radius.pill,
+                    backgroundColor: colors.surface,
+                  }}
+                >
+                  <Text weight="medium" style={{ fontSize: 12 }} color={colors.error}>
+                    Clear
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: 4 }}>
+              {[
+                { label: "+ 15m", calc: () => new Date(Date.now() + 15 * 60 * 1000) },
+                { label: "+ 1 hour", calc: () => new Date(Date.now() + 60 * 60 * 1000) },
+                {
+                  label: "Tonight 8 PM",
+                  calc: () => {
+                    const d = new Date();
+                    d.setHours(20, 0, 0, 0);
+                    if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+                    return d;
+                  },
+                },
+                {
+                  label: "Tomorrow 9 AM",
+                  calc: () => {
+                    const d = addDays(new Date(), 1);
+                    d.setHours(9, 0, 0, 0);
+                    return d;
+                  },
+                },
+              ].map((p) => (
+                <Pressable
+                  key={p.label}
+                  onPress={() => handleSetReminder(p.calc())}
+                  style={{
+                    paddingHorizontal: spacing.md,
+                    paddingVertical: spacing.sm,
+                    borderRadius: radius.pill,
+                    backgroundColor: colors.surfaceSecondary,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: colors.border,
+                  }}
+                >
+                  <Text weight="medium" style={{ fontSize: 13 }}>
+                    {p.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
         </Section>
 
         <Section label="Category">

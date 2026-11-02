@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { AppData, Task, Project, Note, Settings, Priority } from "./types";
+import { cancelTaskReminder } from "../utils/notifications";
 
 const STORAGE_KEY = "nova.appdata.v1";
 
@@ -153,6 +154,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       priority: input.priority ?? "normal",
       category: input.category ?? "personal",
       dueDate: input.dueDate ?? null,
+      reminderTime: input.reminderTime ?? null,
+      notificationId: input.notificationId ?? null,
       completed: false,
       completedAt: null,
       projectId: input.projectId ?? null,
@@ -178,10 +181,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       tasks: d.tasks.map((t) => {
         if (t.id !== id) return t;
         const now = new Date().toISOString();
+        const willComplete = !t.completed;
+        if (willComplete && t.notificationId) {
+          cancelTaskReminder(t.notificationId, t.id);
+        }
         return {
           ...t,
-          completed: !t.completed,
-          completedAt: !t.completed ? now : null,
+          completed: willComplete,
+          completedAt: willComplete ? now : null,
           updatedAt: now,
         };
       }),
@@ -189,7 +196,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const deleteTask = useCallback((id: string) => {
-    setData((d) => ({ ...d, tasks: d.tasks.filter((t) => t.id !== id) }));
+    setData((d) => {
+      const taskToDelete = d.tasks.find((t) => t.id === id);
+      if (taskToDelete?.notificationId) {
+        cancelTaskReminder(taskToDelete.notificationId, id);
+      }
+      return { ...d, tasks: d.tasks.filter((t) => t.id !== id) };
+    });
   }, []);
 
   const addProject = useCallback((input: Partial<Project> & { title: string }) => {

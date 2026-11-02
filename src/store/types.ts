@@ -10,6 +10,8 @@ export interface Task {
   priority: Priority;
   category: Category;
   dueDate?: string | null;
+  reminderTime?: string | null;
+  notificationId?: string | null;
   completed: boolean;
   completedAt?: string | null;
   projectId?: string | null;

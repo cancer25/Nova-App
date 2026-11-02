@@ -12,6 +12,7 @@ import {
   formatShortDate,
   addDays,
 } from '@/src/utils/date';
+import { scheduleTaskReminder } from '@/src/utils/notifications';
 import { Category, Priority } from '@/src/store/types';
 
 interface SmartCaptureModalProps {
@@ -128,16 +129,25 @@ export function SmartCaptureModal({ onClose }: SmartCaptureModalProps) {
     updateItem(id, { dueDate });
   };
 
-  const saveAll = () => {
+  const saveAll = async () => {
     if (items.length === 0) return;
-    items.forEach((it) => {
-      addTask({
+    for (const it of items) {
+      const task = addTask({
         title: it.title,
         priority: it.priority,
         category: it.category,
         dueDate: it.dueDate,
+        reminderTime: it.dueDate,
       });
-    });
+
+      if (it.dueDate && new Date(it.dueDate).getTime() > Date.now()) {
+        scheduleTaskReminder({
+          id: task.id,
+          title: task.title,
+          date: it.dueDate,
+        });
+      }
+    }
     onClose();
   };
 
